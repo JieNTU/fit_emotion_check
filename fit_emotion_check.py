@@ -346,7 +346,31 @@ if st.session_state.page == 'fit_upload':
 
 # 第二頁：情緒資料上傳與處理
 elif st.session_state.page == 'emotion_upload':
-    st.title("📂 合併 FIT 與 情緒問卷")
+    st.title("📂 合併 FIT 與情緒問卷")
+
+    # 注入 CSS 樣式以放大 checkbox 字體
+    st.markdown("""
+        <style>
+        .stCheckbox > label {
+            font-size: 18px !important;  /* 放大 checkbox 標籤字體 */
+            margin-bottom: 5px;  /* 增加與下方警訊的間距 */
+        }
+        </style>
+    """, unsafe_allow_html=True)
+
+    # 初始化 session_state 用於追蹤每個 ID 的 valid 狀態
+    if 'valid_ids' not in st.session_state:
+        st.session_state.valid_ids = {}
+    if 'processed_data' not in st.session_state:
+        st.session_state.processed_data = None
+    if 'alerts_dict' not in st.session_state:
+        st.session_state.alerts_dict = {}
+    if 'merged_all_list' not in st.session_state:
+        st.session_state.merged_all_list = []
+    if 'all_emotion_data' not in st.session_state:
+        st.session_state.all_emotion_data = []
+    if 'invalid_ids' not in st.session_state:
+        st.session_state.invalid_ids = set()
 
     uploaded_emotion_zip = st.file_uploader("📦 上傳包含多個 .csv 的 ZIP 檔", type="zip")
 
@@ -366,7 +390,7 @@ elif st.session_state.page == 'emotion_upload':
         all_emotion_data = []
         merged_raw_all = []
         merged_all_list = []
-        alerts = []
+        alerts_dict = {}
         valid_file_ids = set(df_minute['ID'].unique())
         invalid_ids = set()
 
@@ -417,10 +441,16 @@ elif st.session_state.page == 'emotion_upload':
             st.subheader("📃 所有合併後的情緒問卷")
             df_all_emotion = pd.concat(all_emotion_data, ignore_index=True)
             st.dataframe(df_all_emotion)
+            st.session_state.all_emotion_data = all_emotion_data
 
         if merged_raw_all:
             merged_all_df = pd.concat(merged_raw_all, ignore_index=True)
             merged_all_df['Time_TW'] = pd.to_datetime(merged_all_df['Time_TW']).dt.tz_localize(None).dt.floor('min')
+
+            # 初始化 valid_ids，預設所有 ID 為 valid
+            for id_val in df_minute['ID'].unique():
+                if id_val not in st.session_state.valid_ids:
+                    st.session_state.valid_ids[id_val] = True
 
             for id_val in df_minute['ID'].unique():
                 df_minute_part = df_minute[df_minute['ID'] == id_val].copy()
@@ -435,6 +465,8 @@ elif st.session_state.page == 'emotion_upload':
                     suffixes=('', '_merged')
                 )
 
+                # 檢查資料問題並記錄警訊
+                alerts = []
                 is_valid = True
                 if 'Q1' in merged.columns:
                     q1_series = merged['Q1']
@@ -448,19 +480,72 @@ elif st.session_state.page == 'emotion_upload':
                         alerts.append(f"⚠️ 檔案 {fit_id} 問卷可能填答不完整（前或後 5 筆為 NA）")
                         is_valid = False
 
+                alerts_dict[id_val] = alerts
                 if not is_valid:
                     invalid_ids.add(id_val)
-                    continue
 
+                # 儲存 merged 資料
+                merged_all_list.append((id_val, merged))
+
+            st.session_state.merged_all_list = merged_all_list
+            st.session_state.alerts_dict = alerts_dict
+            st.session_state.invalid_ids = invalid_ids
+            st.session_state.processed_data = True
+
+        temp_dir_emotion.cleanup()
+
+    # 顯示處理後的資料
+    if st.session_state.processed_data:
+        # 顯示每個 ID 的 DataFrame 及其警訊
+        for id_val, merged in st.session_state.merged_all_list:
+            # 顯示 checkbox 控制是否 valid
+            st.session_state.valid_ids[id_val] = st.checkbox(
+                f"有效資料 (ID = {id_val})",
+                value=st.session_state.valid_ids[id_val],
+                key=f"valid_{id_val}"
+            )
+
+            # 顯示警訊（位於 checkbox 下方）
+            if id_val in st.session_state.alerts_dict and st.session_state.alerts_dict[id_val]:
+                st.markdown(f"**🔎資料檢驗 (ID = {id_val})**")
+                for msg in st.session_state.alerts_dict[id_val]:
+                    st.warning(msg)
+            else:
+                st.success(f"ID = {id_val} 所有檢核項目皆通過！")
+
+            # 如果 checkbox 被勾選（valid），則顯示 DataFrame
+            if st.session_state.valid_ids[id_val]:
                 st.subheader(f"📜 ID = {id_val}")
                 st.dataframe(merged)
-                merged_all_list.append(merged)
 
-        final_valid_ids = set(df_minute['ID'].unique()) - invalid_ids
+        # 計算最終有效 ID（僅包含 checkbox 勾選的 ID）
+        final_valid_ids = {id_val for id_val in st.session_state.valid_ids if st.session_state.valid_ids[id_val]}
 
-        if merged_all_list:
-            final_result = pd.concat(merged_all_list, ignore_index=True)
+        # 顯示最終有效樣本數
+        st.markdown(
+            f"\u2705 最終有效樣本：<span style='font-weight:bold; color:red;'><strong>{len(final_valid_ids)}</strong> 筆</span>",
+            unsafe_allow_html=True
+        )
 
+        # 顯示被排除的樣本 ID（僅包含 checkbox 未勾選的 ID）
+        excluded_ids = {id_val for id_val in st.session_state.valid_ids if not st.session_state.valid_ids[id_val]}
+        if excluded_ids:
+            st.markdown("### \u274C 被排除的樣本 ID")
+            for eid in sorted(excluded_ids):
+                st.markdown(f"- {eid}")
+
+        # 準備有效資料（僅包含 checkbox 勾選的 ID）
+        df_all_valid = st.session_state.df_all[st.session_state.df_all['ID'].isin(final_valid_ids)].copy()
+        df_minute_valid = st.session_state.df_minute[st.session_state.df_minute['ID'].isin(final_valid_ids)].copy()
+        final_result = pd.concat(
+            [merged for id_val, merged in st.session_state.merged_all_list if id_val in final_valid_ids],
+            ignore_index=True
+        )
+
+        # 下載合併資料，顯示 checkbox 打勾數量
+        if not final_result.empty:
+            valid_count = len(final_valid_ids)
+            st.markdown(f"📊 已選 <strong>{valid_count}</strong> 筆有效資料", unsafe_allow_html=True)
             csv = final_result.to_csv(index=False).encode('utf-8')
             st.download_button(
                 label="\U0001F4E5 下載所有合併資料",
@@ -469,31 +554,6 @@ elif st.session_state.page == 'emotion_upload':
                 mime='text/csv',
                 key="download_all_merged"
             )
-        else:
-            st.warning("\u2757 無有效的情緒資料檔案與 FIT 資料匹配")
-
-        if alerts:
-            st.markdown("### \U0001F50D 資料警示")
-            for msg in alerts:
-                st.warning(msg)
-        else:
-            st.success("\U0001F389 所有檢核項目皆通過！")
-
-        st.markdown(
-            f"\u2705 最終有效樣本：<span style='font-weight:bold; color:red;'><strong>{len(final_valid_ids)}</strong> 筆</span>",
-            unsafe_allow_html=True
-        )
-
-        excluded_ids = set(df_minute['ID'].unique()) - final_valid_ids
-        if excluded_ids:
-            st.markdown("### \u274C 被排除的樣本 ID")
-            for eid in sorted(excluded_ids):
-                st.markdown(f"- {eid}")
-
-        df_all_valid = df_all[df_all['ID'].isin(final_valid_ids)].copy()
-        df_minute_valid = df_minute[df_minute['ID'].isin(final_valid_ids)].copy()
-
-        st.subheader("\U0001F4C4 下載有效資料")
 
         # 提取 PERSONID 並用於檔案名稱
         if not df_all_valid.empty and not df_minute_valid.empty:
@@ -529,8 +589,6 @@ elif st.session_state.page == 'emotion_upload':
             )
         else:
             st.warning("❗ 無有效資料可供下載。")
-
-        temp_dir_emotion.cleanup()
 
     if st.button("返回 FIT 檔案處理"):
         st.session_state.page = 'fit_upload'
