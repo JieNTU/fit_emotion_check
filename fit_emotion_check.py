@@ -291,20 +291,23 @@ if st.session_state.page == 'fit_upload':
             mime="text/csv"
         )
 
-        st.subheader("\U0001F5FA GPS 路徑地圖")
+        st.subheader("🗺️ GPS 路徑地圖")
         map_options = [name for name, _ in all_coords]
         selected_maps = st.multiselect("選擇要顯示的路徑：", map_options, default=map_options)
 
         if any(len(coords) > 0 for name, coords in all_coords if name in selected_maps):
             first_valid = next((coords for name, coords in all_coords if name in selected_maps and coords), None)
-            m = folium.Map(location=first_valid[0], zoom_start=13)
+            m = folium.Map(location=first_valid[0], zoom_start=13, tiles=None)
+
+            # ✅ 使用淺灰色背景
+            folium.TileLayer('CartoDB positron', name='Light Map', control=False).add_to(m)
 
             import hashlib
             import colorsys
 
             def name_to_color(name):
                 hash_digest = hashlib.md5(name.encode()).hexdigest()
-                hue = int(hash_digest[:2], 16) / 255  # 取前兩位做為 hue
+                hue = int(hash_digest[:2], 16) / 255
                 rgb = colorsys.hsv_to_rgb(hue, 0.8, 0.9)
                 return '#%02x%02x%02x' % tuple(int(c * 255) for c in rgb)
 
@@ -316,7 +319,7 @@ if st.session_state.page == 'fit_upload':
 
             st_folium(m, width=800, height=500)
         else:
-            st.warning("\u2757 無 GPS 座標可顯示（position_lat / position_long 為 None）")
+            st.warning("❗ 無 GPS 座標可顯示（position_lat / position_long 為 None）")
 
         if st.button("開始處理情緒資料 (研究者)"):
             st.session_state.page = 'emotion_upload'
