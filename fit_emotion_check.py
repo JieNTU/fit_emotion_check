@@ -314,8 +314,26 @@ if st.session_state.page == 'fit_upload':
             for name, coords in all_coords:
                 if name in selected_maps:
                     color = name_to_color(name)
+
+                    # 畫線
                     folium.PolyLine(coords, tooltip=name, color=color).add_to(m)
-                    folium.Marker(coords[0], popup=name).add_to(m)
+
+                    # 起點：藍色、info-sign
+                    if coords:
+                        folium.Marker(
+                            coords[0],
+                            popup=f"{name} 起點",
+                            icon=folium.Icon(icon="play", color="blue")
+                        ).add_to(m)
+
+                    # 終點：紅色、stop
+                    if coords:
+                        folium.Marker(
+                            coords[-1],
+                            popup=f"{name} 終點",
+                            icon=folium.Icon(icon="stop", color="red")
+                        ).add_to(m)
+
 
             st_folium(m, width=800, height=500)
         else:
