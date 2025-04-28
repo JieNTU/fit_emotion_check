@@ -30,6 +30,42 @@ if 'csv_filename_all' not in st.session_state:
 if 'csv_filename_minute' not in st.session_state:
     st.session_state.csv_filename_minute = "df_all_minute.csv"
 
+# 檢查 ZIP 檔案是否有效
+def is_valid_zip(file):
+    """檢查 ZIP 檔案是否有效"""
+    try:
+        with zipfile.ZipFile(file) as zip_ref:
+            zip_ref.testzip()  # 檢查 ZIP 檔案完整性
+        return True
+    except zipfile.BadZipFile:
+        return False
+
+# 遞迴解壓縮 ZIP 檔案並收集 .fit 檔案
+def extract_zip_recursive(zip_file, extract_path, fit_files):
+    """遞迴解壓縮 ZIP 檔案並收集 .fit 檔案"""
+    try:
+        with zipfile.ZipFile(zip_file, 'r') as zip_ref:
+            zip_ref.extractall(extract_path)
+            for file_info in zip_ref.infolist():
+                file_path = os.path.join(extract_path, file_info.filename)
+                # 忽略 macOS 隱藏檔案和資料夾
+                if file_info.filename.startswith('__MACOSX/') or file_info.filename.startswith('._'):
+                    continue
+                # 檢查是否為 ZIP 檔案
+                if file_info.filename.endswith('.zip') and os.path.isfile(file_path):
+                    if is_valid_zip(file_path):
+                        # 遞迴解壓縮內嵌 ZIP
+                        nested_extract_path = os.path.join(extract_path, os.path.basename(file_info.filename).replace('.zip', ''))
+                        os.makedirs(nested_extract_path, exist_ok=True)
+                        extract_zip_recursive(file_path, nested_extract_path, fit_files)
+                # 檢查是否為 .fit 檔案
+                elif file_info.filename.endswith('.fit'):
+                    fit_files.append(file_path)
+    except zipfile.BadZipFile as e:
+        st.error(f"無法解壓縮檔案 {zip_file.name}：檔案損壞或格式錯誤")
+    except Exception as e:
+        st.error(f"處理檔案 {zip_file.name} 時發生錯誤：{str(e)}")
+
 # 第一頁：FIT 檔案上傳與處理
 if st.session_state.page == 'fit_upload':
     st.title("\U0001F4CA FIT 檔案分析工具")
@@ -37,9 +73,20 @@ if st.session_state.page == 'fit_upload':
     uploaded_fit_zip = st.file_uploader("請上傳包含 .fit 檔案的 ZIP 資料夾", type="zip")
 
     if uploaded_fit_zip:
+        if not is_valid_zip(uploaded_fit_zip):
+            st.error("\U0001F6A8 上傳的 ZIP 檔案無效或損壞，請檢查檔案並重新上傳")
+            st.stop()
+
         temp_dir = tempfile.TemporaryDirectory()
-        with zipfile.ZipFile(uploaded_fit_zip, 'r') as zip_ref:
-            zip_ref.extractall(temp_dir.name)
+        fit_files = []
+
+        # 遞迴解壓縮 ZIP 檔案
+        extract_zip_recursive(uploaded_fit_zip, temp_dir.name, fit_files)
+
+        if not fit_files:
+            st.error("\U0001F6A8 ZIP 檔案中未找到任何 .fit 檔案")
+            temp_dir.cleanup()
+            st.stop()
 
         zip_name = uploaded_fit_zip.name.replace(".zip", "")
         parts = zip_name.split("-")
@@ -49,12 +96,6 @@ if st.session_state.page == 'fit_upload':
         else:
             st.session_state.csv_filename_all = "df_all.csv"
             st.session_state.csv_filename_minute = "df_all_minute.csv"
-
-        fit_files = []
-        for root, dirs, files in os.walk(temp_dir.name):
-            for file in files:
-                if file.endswith('.fit'):
-                    fit_files.append(os.path.join(root, file))
 
         summary_list = []
         long_records = []
@@ -333,7 +374,6 @@ if st.session_state.page == 'fit_upload':
                             popup=f"{name} 終點",
                             icon=folium.Icon(icon="stop", color="red")
                         ).add_to(m)
-
 
             st_folium(m, width=800, height=500)
         else:
