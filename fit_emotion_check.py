@@ -29,6 +29,8 @@ if 'csv_filename_all' not in st.session_state:
     st.session_state.csv_filename_all = "df_all.csv"
 if 'csv_filename_minute' not in st.session_state:
     st.session_state.csv_filename_minute = "df_all_minute.csv"
+if 'valid_files' not in st.session_state:
+    st.session_state.valid_files = {}
 
 # 檢查 ZIP 檔案是否有效
 def is_valid_zip(file):
@@ -70,37 +72,51 @@ def extract_zip_recursive(zip_file, extract_path, fit_files):
 if st.session_state.page == 'fit_upload':
     st.title("\U0001F4CA FIT 檔案分析工具")
 
-    uploaded_fit_zip = st.file_uploader("請上傳包含 .fit 檔案的 ZIP 資料夾", type="zip")
+    uploaded_files = st.file_uploader("請上傳包含 .fit 檔案的 ZIP 資料夾或單個 .fit 檔案", type=["zip", "fit"], accept_multiple_files=True)
 
-    if uploaded_fit_zip:
-        if not is_valid_zip(uploaded_fit_zip):
-            st.error("\U0001F6A8 上傳的 ZIP 檔案無效或損壞，請檢查檔案並重新上傳")
-            st.stop()
-
+    if uploaded_files:
         temp_dir = tempfile.TemporaryDirectory()
         fit_files = []
 
-        # 遞迴解壓縮 ZIP 檔案
-        extract_zip_recursive(uploaded_fit_zip, temp_dir.name, fit_files)
+        for uploaded_file in uploaded_files:
+            if uploaded_file.name.endswith('.zip'):
+                if not is_valid_zip(uploaded_file):
+                    st.error("\U0001F6A8 上傳的 ZIP 檔案無效或損壞，請檢查檔案並重新上傳")
+                    temp_dir.cleanup()
+                    st.stop()
+                # 遞迴解壓縮 ZIP 檔案
+                extract_zip_recursive(uploaded_file, temp_dir.name, fit_files)
+                zip_name = uploaded_file.name.replace(".zip", "")
+                parts = zip_name.split("-")
+                if len(parts) >= 2:
+                    st.session_state.csv_filename_all = f"{parts[0]}_{parts[1]}_df_all.csv"
+                    st.session_state.csv_filename_minute = f"{parts[0]}_{parts[1]}_df_all_minute.csv"
+                else:
+                    st.session_state.csv_filename_all = "df_all.csv"
+                    st.session_state.csv_filename_minute = "df_all_minute.csv"
+            elif uploaded_file.name.endswith('.fit'):
+                # 儲存單個 .fit 檔案到臨時目錄
+                fit_path = os.path.join(temp_dir.name, uploaded_file.name)
+                with open(fit_path, 'wb') as f:
+                    f.write(uploaded_file.getvalue())
+                fit_files.append(fit_path)
+                # 設定檔案名稱
+                parts = uploaded_file.name.replace(".fit", "").split("-")
+                if len(parts) >= 2:
+                    st.session_state.csv_filename_all = f"{parts[0]}_{parts[1]}_df_all.csv"
+                    st.session_state.csv_filename_minute = f"{parts[0]}_{parts[1]}_df_all_minute.csv"
+                else:
+                    st.session_state.csv_filename_all = "df_all.csv"
+                    st.session_state.csv_filename_minute = "df_all_minute.csv"
 
         if not fit_files:
-            st.error("\U0001F6A8 ZIP 檔案中未找到任何 .fit 檔案")
+            st.error("\U0001F6A8 未找到任何 .fit 檔案")
             temp_dir.cleanup()
             st.stop()
-
-        zip_name = uploaded_fit_zip.name.replace(".zip", "")
-        parts = zip_name.split("-")
-        if len(parts) >= 2:
-            st.session_state.csv_filename_all = f"{parts[0]}_{parts[1]}_df_all.csv"
-            st.session_state.csv_filename_minute = f"{parts[0]}_{parts[1]}_df_all_minute.csv"
-        else:
-            st.session_state.csv_filename_all = "df_all.csv"
-            st.session_state.csv_filename_minute = "df_all_minute.csv"
 
         summary_list = []
         long_records = []
         all_coords = []
-        valid_fit_files = []
 
         for fit_path in fit_files:
             fit_filename = os.path.basename(fit_path)
@@ -122,6 +138,10 @@ if st.session_state.page == 'fit_upload':
             is_weekday = taiwan_time.weekday() <= 4 if taiwan_time else None
 
             is_valid = (distance_gt_2000 and has_gps and has_hrv and is_weekday)
+            # 初始化 checkbox 狀態，預設不合格檔案為 unchecked
+            if fit_filename not in st.session_state.valid_files:
+                st.session_state.valid_files[fit_filename] = is_valid
+
             summary_list.append({
                 'file': fit_filename,
                 'total_distance': total_distance,
@@ -132,11 +152,7 @@ if st.session_state.page == 'fit_upload':
                 'is_weekday': is_weekday
             })
 
-            if not is_valid:
-                continue
-
-            valid_fit_files.append(fit_filename)
-
+            # 處理所有檔案的數據，不僅限於合格檔案
             hrv_queue = []
             gps_queue = []
             gps_coords = []
@@ -188,7 +204,7 @@ if st.session_state.page == 'fit_upload':
 
                     record_data['ID'] = fit_filename
                     record_data['total_distance'] = total_distance
-                    record_data['distance_gt_2000'] = distance_gt_2000
+                    record_data['distance_gt_2000']: distance_gt_2000
                     record_data['has_gps'] = has_gps
                     record_data['has_hrv'] = has_hrv
 
@@ -267,6 +283,16 @@ if st.session_state.page == 'fit_upload':
         )
         df_minute = df_minute[df_minute['valid']].drop(columns=['valid', 'hrv_ms_filtered'])
 
+        # 儲存完整數據以便後續動態篩選
+        st.session_state.df_all_full = df_all
+        st.session_state.df_minute_full = df_minute
+
+        # 根據當前 valid_files 篩選數據
+        selected_files = [f for f in st.session_state.valid_files if st.session_state.valid_files[f]]
+        df_all = df_all[df_all['ID'].isin(selected_files)]
+        df_minute = df_minute[df_minute['ID'].isin(selected_files)]
+        all_coords = [(name, coords) for name, coords in all_coords if name in selected_files]
+
         st.session_state.df_minute = df_minute
         st.session_state.df_all = df_all
         st.session_state.df_summary = df_summary
@@ -274,7 +300,8 @@ if st.session_state.page == 'fit_upload':
         st.session_state.summary_list = summary_list
 
         st.subheader("\U0001F4CB FIT 摘要資訊")
-        st.dataframe(df_summary.rename(columns={
+        # 準備顯示的 DataFrame，包含 checkbox 欄位
+        display_summary = df_summary.rename(columns={
             'file': '檔名',
             'total_distance': '總距離',
             'distance_gt_2000': '是否超過2公里',
@@ -282,7 +309,27 @@ if st.session_state.page == 'fit_upload':
             'has_hrv': '是否有HRV資料',
             'timestamp': '時間',
             'is_weekday': '是否為平日'
-        }))
+        }).copy()
+        display_summary['有效'] = display_summary['檔名'].map(st.session_state.valid_files)
+
+        # 使用 st.data_editor 顯示表格並允許編輯 checkbox
+        edited_df = st.data_editor(
+            display_summary,
+            column_config={
+                '有效': st.column_config.CheckboxColumn(
+                    '有效',
+                    help="勾選表示該檔案有效",
+                    default=True
+                )
+            },
+            disabled=[col for col in display_summary.columns if col != '有效'],
+            hide_index=True,
+            key="summary_editor"
+        )
+
+        # 同步編輯後的 checkbox 狀態到 st.session_state.valid_files
+        for idx, row in edited_df.iterrows():
+            st.session_state.valid_files[row['檔名']] = row['有效']
 
         alarm_msgs = []
         for row in summary_list:
@@ -301,12 +348,7 @@ if st.session_state.page == 'fit_upload':
             for msg in alarm_msgs:
                 st.warning(msg)
 
-        valid_records = df_summary[
-            (df_summary["distance_gt_2000"] == True) &
-            (df_summary["has_gps"] == True) &
-            (df_summary["has_hrv"] == True) &
-            (df_summary["is_weekday"] == True)
-        ]
+        valid_records = [row for row in summary_list if st.session_state.valid_files[row['file']]]
 
         st.markdown(
             f"\u2705 初步有效紀錄為 <span style='font-weight:bold; color:red;'><strong>{len(valid_records)}</strong> 筆</span>，後續仍需確認是否無重複起訖點，實際有效紀錄依本研究室信件通知為準",
@@ -314,8 +356,13 @@ if st.session_state.page == 'fit_upload':
         )
 
         st.subheader("\U0001F4E5 下載資料")
+        # 根據當前 valid_files 篩選完整數據進行下載
+        selected_files = [f for f in st.session_state.valid_files if st.session_state.valid_files[f]]
+        df_all_download = st.session_state.df_all_full[st.session_state.df_all_full['ID'].isin(selected_files)]
+        df_minute_download = st.session_state.df_minute_full[st.session_state.df_minute_full['ID'].isin(selected_files)]
+
         csv_buffer_all = io.StringIO()
-        df_all.to_csv(csv_buffer_all, index=False)
+        df_all_download.to_csv(csv_buffer_all, index=False)
         st.download_button(
             label=f"\U0001F4C5 下載原始數據 ({st.session_state.csv_filename_all})",
             data=csv_buffer_all.getvalue(),
@@ -324,7 +371,7 @@ if st.session_state.page == 'fit_upload':
         )
 
         csv_buffer_minute = io.StringIO()
-        df_minute.to_csv(csv_buffer_minute, index=False)
+        df_minute_download.to_csv(csv_buffer_minute, index=False)
         st.download_button(
             label=f"\U0001F4C5 下載每分鐘數據 ({st.session_state.csv_filename_minute})",
             data=csv_buffer_minute.getvalue(),
@@ -340,7 +387,6 @@ if st.session_state.page == 'fit_upload':
             first_valid = next((coords for name, coords in all_coords if name in selected_maps and coords), None)
             m = folium.Map(location=first_valid[0], zoom_start=13, tiles=None)
 
-            # ✅ 使用淺灰色背景
             folium.TileLayer('CartoDB positron', name='Light Map', control=False).add_to(m)
 
             import hashlib
