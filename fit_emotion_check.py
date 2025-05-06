@@ -234,6 +234,19 @@ if st.session_state.page == 'fit_upload':
 
         df_all['minute'] = df_all['timestamp_taiwan'].dt.floor('T')
 
+# 除錯
+        required_cols = [
+            'ID', 'minute', 'hrv_ms_filtered',
+            'heart_rate', 'enhanced_speed', 'enhanced_altitude',
+            'temperature', 'Latitude', 'Longitude'
+        ]
+        missing_cols = [col for col in required_cols if col not in df_all.columns]
+        for col in missing_cols:
+            df_all[col] = np.nan
+        if missing_cols:
+            st.warning(f"⚠️ 下列欄位在 df_all 中缺失，已自動補齊為 NA：{missing_cols}")
+
+
         def get_middle_point(coords):
             if coords and isinstance(coords, list) and len(coords) > 0:
                 coords = [c for c in coords if c is not None]
