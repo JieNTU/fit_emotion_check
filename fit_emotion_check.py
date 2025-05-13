@@ -641,47 +641,49 @@ elif st.session_state.page == 'emotion_upload':
             ignore_index=True
         )
 
-        # 下載合併資料，顯示 checkbox 打勾數量
+        if not df_all_valid.empty and not df_minute_valid.empty:
+            first_id = df_all_valid["ID"].iloc[0]  # e.g., "177-0422-15.fit"
+            person_id = first_id.split("-")[0]     # e.g., "177"
+
+            # 檢查是否有多個不同的 PERSONID
+            all_person_ids = df_all_valid["ID"].apply(lambda x: x.split("-")[0]).unique()
+            if len(all_person_ids) > 1:
+                id_list_str = ", ".join(all_person_ids)
+                st.warning(
+                    f"⚠️ 資料中發現多個 PERSONID：{id_list_str}。將使用第一個 PERSONID ({person_id}) 作為檔名。"
+                )
+
+        # 顯示下載合併結果（需 person_id）
         if not final_result.empty:
             valid_count = len(final_valid_ids)
             st.markdown(f"📊 已選 <strong>{valid_count}</strong> 筆有效資料", unsafe_allow_html=True)
-            csv = final_result.to_csv(index=False).encode('utf-8')
+
+            csv = final_result.to_csv(index=False).encode("utf-8")
             st.download_button(
-                label="\U0001F4E5 下載所有合併資料",
+                label="📥 下載所有合併資料",
                 data=csv,
-                file_name="merged_emotion.csv",
-                mime='text/csv',
+                file_name=f"{person_id}_merged_emotion.csv",
+                mime="text/csv",
                 key="download_all_merged"
             )
 
-        # 提取 PERSONID 並用於檔案名稱
+        # 顯示下載原始資料與每分鐘資料
         if not df_all_valid.empty and not df_minute_valid.empty:
-            # 假設所有 ID 的 PERSONID 相同，取第一個 ID 提取 PERSONID
-            first_id = df_all_valid['ID'].iloc[0]  # 例如 "177-0422-15.fit"
-            person_id = first_id.split("-")[0]  # 提取 "177"
-
-            # 檢查是否有不同的 PERSONID
-            all_person_ids = df_all_valid['ID'].apply(lambda x: x.split("-")[0]).unique()
-            if len(all_person_ids) > 1:
-                st.warning(f"⚠️ 資料中包含多個 PERSONID：{', '.join(all_person_ids)}。將使用第一個 PERSONID ({person_id}) 命名檔案。")
-
-            # 下載 df_all_valid
-            csv_buffer_all_valid = io.StringIO()
-            df_all_valid.to_csv(csv_buffer_all_valid, index=False)
+            # 匯出所有有效原始數據
+            csv_all_valid = df_all_valid.to_csv(index=False)
             st.download_button(
-                label="\U0001F4E5 下載所有有效原始數據",
-                data=csv_buffer_all_valid.getvalue(),
+                label="📥 下載所有有效原始數據",
+                data=csv_all_valid,
                 file_name=f"{person_id}_df_all_valid.csv",
                 mime="text/csv",
                 key="download_all_valid"
             )
 
-            # 下載 df_minute_valid
-            csv_buffer_minute_valid = io.StringIO()
-            df_minute_valid.to_csv(csv_buffer_minute_valid, index=False)
+            # 匯出所有有效每分鐘數據
+            csv_minute_valid = df_minute_valid.to_csv(index=False)
             st.download_button(
-                label="\U0001F4E5 下載所有有效每分鐘數據",
-                data=csv_buffer_minute_valid.getvalue(),
+                label="📥 下載所有有效每分鐘數據",
+                data=csv_minute_valid,
                 file_name=f"{person_id}_df_minute_valid.csv",
                 mime="text/csv",
                 key="download_minute_valid"
